@@ -11,6 +11,13 @@ from typing import List, Union, Generator, Iterator, Dict, Any, AsyncGenerator
 import uuid
 from pydantic import BaseModel, Field
 import requests
+import logging  # 로깅 추가
+
+# 로거 설정
+logging.basicConfig(
+    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 class PipelineConfig(BaseModel):
@@ -29,6 +36,7 @@ class Pipeline:
         self.thread_id = str(uuid.uuid4())
         # 이미 반환한 메시지 id를 저장하여 중복 반환 방지
         self.returned_ids = set()
+        logger.info(f"Pipeline initialized with thread_id: {self.thread_id}")
 
     async def on_startup(self):
         pass
@@ -48,14 +56,17 @@ class Pipeline:
 
         if len(messages) == 1:
             self.thread_id = str(uuid.uuid4())
+            logger.info(f"New conversation started with thread_id: {self.thread_id}")
 
         request_body = {
             "config": {"configurable": {"thread_id": self.thread_id}},
             "messages": {"role": "user", "content": user_message},
         }
+        logger.debug(f"Request body: {request_body}")
         responses = []
 
         try:
+            logger.info(f"Sending request to {self.ENDPOINT}")
             response = requests.post(
                 self.ENDPOINT,
                 json=request_body,
@@ -63,6 +74,7 @@ class Pipeline:
             )
             response.raise_for_status()
         except Exception as e:
+            logger.error(f"Request failed: {str(e)}")
             responses.append({"error": str(e)})
             return responses
 
@@ -75,15 +87,20 @@ class Pipeline:
                     line_decoded = (
                         line.decode("utf-8") if isinstance(line, bytes) else line
                     )
+                    logger.debug(f"Received line: {line_decoded}")
                     if line_decoded.startswith("data: "):
                         data_line = line_decoded[len("data: ") :].strip()
                         if data_line == "[DONE]":
+                            logger.info("Stream completed")
                             break
                         try:
                             data_dict = ast.literal_eval(data_line)
+                            logger.debug(f"Parsed data: {data_dict}")
                         except Exception as ex:
+                            logger.error(f"Failed to parse line: {ex}")
                             continue
                         if "agent" in data_dict:
+                            logger.debug("Processing agent message")
                             msg_list = data_dict["agent"].get("messages", [])
                             if msg_list:
                                 msg_obj = msg_list[0]
@@ -99,6 +116,7 @@ class Pipeline:
                                 message_text = msg_obj.get("content", "")
                                 yield {"category": role, "message": message_text}
                         elif "tools" in data_dict:
+                            logger.debug("Processing tool message")
                             msg_list = data_dict["tools"].get("messages", [])
                             if msg_list:
                                 msg_obj = msg_list[0]
