@@ -97,7 +97,19 @@ class Pipeline:
                             data_dict = ast.literal_eval(data_line)
                             print(f"[Parse] Data: {data_dict}")
                         except Exception as ex:
-                            print(f"[Error] Parse failed: {ex}")
+                            print(f"[Warning] literal_eval failed: {ex}")
+                            import re
+
+                            m = re.search(r"content\s*=\s*'([^']*)'", data_line)
+                            if m:
+                                message_text = m.group(1)
+                                if "agent" in data_line:
+                                    yield {
+                                        "category": "assistant",
+                                        "message": message_text,
+                                    }
+                                elif "tools" in data_line:
+                                    yield {"category": "tool", "message": message_text}
                             continue
                         if "agent" in data_dict:
                             print("[Process] Agent message")
