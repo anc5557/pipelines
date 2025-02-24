@@ -12,6 +12,7 @@ import uuid
 from pydantic import BaseModel, Field
 import requests
 import logging  # 로깅 추가
+import json
 
 # 로거 설정
 logging.basicConfig(
@@ -34,7 +35,6 @@ class Pipeline:
         self.name = "History Agent v2"
         self.valves = self.Valves()
         self.thread_id = str(uuid.uuid4())
-        # 이미 반환한 메시지 id를 저장하여 중복 반환 방지
         self.returned_ids = set()
         print(f"[Init] Pipeline initialized with thread_id: {self.thread_id}")
 
@@ -47,6 +47,8 @@ class Pipeline:
     async def stream_response(self, response: Generator) -> AsyncGenerator[str, None]:
         for chunk in response:
             if chunk:
+                if not isinstance(chunk, str):
+                    chunk = json.dumps(chunk)
                 yield f"data: {chunk}\n\n"
         yield "data: [DONE]\n\n"
 
@@ -104,19 +106,22 @@ class Pipeline:
                             if m:
                                 message_text = m.group(1)
                                 if "agent" in data_line:
-                                    yield {
-                                        "category": "assistant",
-                                        "message": message_text,
-                                    }
+                                    yield json.dumps(
+                                        {
+                                            "category": "assistant",
+                                            "message": message_text,
+                                        }
+                                    )
                                 elif "tools" in data_line:
-                                    yield {"category": "tool", "message": message_text}
+                                    yield json.dumps(
+                                        {"category": "tool", "message": message_text}
+                                    )
                             continue
                         if "agent" in data_dict:
                             print("[Process] Agent message")
                             msg_list = data_dict["agent"].get("messages", [])
                             if msg_list:
                                 msg_obj = msg_list[0]
-                                # agent 응답인 경우, response_metadata의 message에서 role을 추출
                                 role = "assistant"
                                 if (
                                     "response_metadata" in msg_obj
@@ -126,7 +131,9 @@ class Pipeline:
                                         "role", "assistant"
                                     )
                                 message_text = msg_obj.get("content", "")
-                                yield {"category": role, "message": message_text}
+                                yield json.dumps(
+                                    {"category": role, "message": message_text}
+                                )
                         elif "tools" in data_dict:
                             print("[Process] Tool message")
                             msg_list = data_dict["tools"].get("messages", [])
@@ -134,6 +141,8 @@ class Pipeline:
                                 msg_obj = msg_list[0]
                                 tool_name = msg_obj.get("name", "tool")
                                 message_text = msg_obj.get("content", "")
-                                yield {"category": tool_name, "message": message_text}
+                                yield json.dumps(
+                                    {"category": tool_name, "message": message_text}
+                                )
 
-        return parse_stream()  # 수정됨: 제너레이터 반환
+        return self.stream_response(parse_stream())
